@@ -1,0 +1,9 @@
+<resources>
+    <style name="Theme.Portal" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/portal_primary</item>
+        <item name="colorPrimaryDark">@color/portal_primary_dark</item>
+        <item name="colorAccent">@color/portal_accent</item>
+        <item name="android:windowBackground">@color/portal_primary_dark</item>
+        <item name="android:statusBarColor">@color/portal_primary_dark</item>
+    </style>
+</resources>

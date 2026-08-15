@@ -1,0 +1,8 @@
+<resources>
+    <color name="portal_primary">#1A1B2E</color>
+    <color name="portal_primary_dark">#0F1020</color>
+    <color name="portal_accent">#6C5CE7</color>
+    <color name="portal_surface">#16172A</color>
+    <color name="portal_on_surface">#EAEAF2</color>
+    <color name="portal_muted">#8A8CA8</color>
+</resources>
