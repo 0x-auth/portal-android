@@ -4,34 +4,42 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
 
+    <!-- allowBackup=false + extraction rules: session cookies never go to backups. -->
     <application
-        android:allowBackup="true"
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:theme="@style/Theme.Portal"
         android:usesCleartextTraffic="false">
 
+        <!-- Tell WebView not to send usage metrics. -->
+        <meta-data android:name="android.webkit.WebView.MetricsOptOut" android:value="true" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:configChanges="orientation|screenSize|keyboardHidden">
+            android:launchMode="singleTop">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
 
-        <!-- Sandbox pool: each of these is a distinct component pinned to its own
-             process, so each one gets a fully isolated WebView cookie/storage jar. -->
-        <activity android:name=".Sandbox0Activity" android:exported="false"
-            android:process=":sandbox0" android:configChanges="orientation|screenSize|keyboardHidden" />
-        <activity android:name=".Sandbox1Activity" android:exported="false"
-            android:process=":sandbox1" android:configChanges="orientation|screenSize|keyboardHidden" />
-        <activity android:name=".Sandbox2Activity" android:exported="false"
-            android:process=":sandbox2" android:configChanges="orientation|screenSize|keyboardHidden" />
-        <activity android:name=".Sandbox3Activity" android:exported="false"
-            android:process=":sandbox3" android:configChanges="orientation|screenSize|keyboardHidden" />
+        <!-- One Recents card per open site; re-opening resumes it. -->
+        <activity
+            android:name=".BrowserActivity"
+            android:exported="false"
+            android:documentLaunchMode="intoExisting"
+            android:autoRemoveFromRecents="false"
+            android:maxRecents="20"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode"
+            android:windowSoftInputMode="adjustResize" />
     </application>
 </manifest>

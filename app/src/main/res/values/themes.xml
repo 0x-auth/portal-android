@@ -1,9 +1,19 @@
 <resources>
     <style name="Theme.Portal" parent="Theme.MaterialComponents.DayNight.NoActionBar">
         <item name="colorPrimary">@color/portal_primary</item>
-        <item name="colorPrimaryDark">@color/portal_primary_dark</item>
+        <item name="colorPrimaryVariant">@color/portal_primary_dark</item>
+        <item name="colorSecondary">@color/portal_accent</item>
         <item name="colorAccent">@color/portal_accent</item>
         <item name="android:windowBackground">@color/portal_primary_dark</item>
         <item name="android:statusBarColor">@color/portal_primary_dark</item>
+        <item name="android:navigationBarColor">@color/portal_primary_dark</item>
+    </style>
+    <style name="TextAppearance.Portal.BarTitle" parent="TextAppearance.Widget.AppCompat.Toolbar.Title">
+        <item name="android:textSize">15sp</item>
+        <item name="android:textColor">@color/portal_on_surface</item>
+    </style>
+    <style name="TextAppearance.Portal.BarSubtitle" parent="TextAppearance.Widget.AppCompat.Toolbar.Subtitle">
+        <item name="android:textSize">11sp</item>
+        <item name="android:textColor">@color/portal_muted</item>
     </style>
 </resources>

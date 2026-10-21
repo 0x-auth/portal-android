@@ -1,154 +1,212 @@
 package com.abhiamu.portal
 
-import android.annotation.SuppressLint
-import android.content.Intent
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
 import android.os.Bundle
-import android.text.InputType
 import android.view.Menu
 import android.view.MenuItem
-import android.view.View
-import android.webkit.WebChromeClient
-import android.webkit.WebView
-import android.webkit.WebViewClient
 import android.widget.EditText
-import android.widget.ProgressBar
+import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.widget.PopupMenu
+import androidx.appcompat.widget.SearchView
 import androidx.appcompat.widget.Toolbar
-import androidx.drawerlayout.widget.DrawerLayout
-import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.core.content.pm.ShortcutInfoCompat
+import androidx.core.content.pm.ShortcutManagerCompat
+import androidx.core.graphics.drawable.IconCompat
+import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.google.android.material.floatingactionbutton.FloatingActionButton
 
 class MainActivity : AppCompatActivity() {
 
-    private lateinit var drawerLayout: DrawerLayout
-    private lateinit var webView: WebView
-    private lateinit var progressBar: ProgressBar
-    private lateinit var bookmarkList: RecyclerView
-    private lateinit var bookmarks: MutableList<Bookmark>
+    private lateinit var sites: MutableList<Site>
+    private lateinit var adapter: SiteAdapter
 
-    private var sandboxCounter = 0
-    private val sandboxActivities = listOf(
-        Sandbox0Activity::class.java,
-        Sandbox1Activity::class.java,
-        Sandbox2Activity::class.java,
-        Sandbox3Activity::class.java
-    )
-
-    @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+        setSupportActionBar(findViewById<Toolbar>(R.id.mainToolbar))
 
-        drawerLayout = findViewById(R.id.mainDrawerLayout)
-
-        val toolbar = findViewById<Toolbar>(R.id.mainToolbar)
-        setSupportActionBar(toolbar)
-
-        progressBar = findViewById(R.id.mainProgressBar)
-        webView = findViewById(R.id.mainWebView)
-
-        webView.settings.javaScriptEnabled = true
-        webView.settings.domStorageEnabled = true
-        webView.webViewClient = object : WebViewClient() {
-            override fun onPageFinished(view: WebView?, url: String?) {
-                super.onPageFinished(view, url)
-                supportActionBar?.subtitle = url
-            }
-        }
-        webView.webChromeClient = object : WebChromeClient() {
-            override fun onProgressChanged(view: WebView?, newProgress: Int) {
-                progressBar.visibility = if (newProgress in 1..99) View.VISIBLE else View.GONE
-                progressBar.progress = newProgress
-            }
-            override fun onReceivedTitle(view: WebView?, title: String?) {
-                supportActionBar?.title = title ?: getString(R.string.app_name)
-            }
-        }
-        webView.loadUrl("about:blank")
-
-        bookmarks = BookmarkStore.load(this)
-        bookmarkList = findViewById(R.id.bookmarkList)
-        bookmarkList.layoutManager = LinearLayoutManager(this)
-        bookmarkList.adapter = BookmarkAdapter(
-            bookmarks,
-            onClick = { bookmark -> openInSandbox(bookmark) },
-            onDelete = { position ->
-                bookmarks.removeAt(position)
-                BookmarkStore.save(this, bookmarks)
-                bookmarkList.adapter?.notifyItemRemoved(position)
-            }
+        sites = SiteStore.load(this)
+        adapter = SiteAdapter(
+            onOpen = { startActivity(BrowserActivity.intentFor(this, it)) },
+            onLongPress = { site, anchor -> showSiteMenu(site, anchor) }
         )
+        findViewById<RecyclerView>(R.id.siteGrid).apply {
+            val cols = (resources.configuration.screenWidthDp / 170).coerceIn(2, 5)
+            layoutManager = GridLayoutManager(this@MainActivity, cols)
+            adapter = this@MainActivity.adapter
+        }
+        findViewById<FloatingActionButton>(R.id.addFab).setOnClickListener { addSite() }
+        refresh()
     }
 
-    private fun openInSandbox(bookmark: Bookmark) {
-        val target = sandboxActivities[sandboxCounter % sandboxActivities.size]
-        sandboxCounter++
-        val intent = Intent(this, target)
-        intent.putExtra(SandboxActivityBase.EXTRA_URL, bookmark.url)
-        startActivity(intent)
-        drawerLayout.closeDrawers()
+    override fun onResume() {
+        super.onResume()
+        // A site may have been saved from inside a browser screen.
+        sites = SiteStore.load(this); refresh()
     }
+
+    private fun refresh(filter: String = currentFilter) {
+        currentFilter = filter
+        val q = filter.trim().lowercase()
+        adapter.submit(if (q.isEmpty()) sites else sites.filter {
+            it.name.lowercase().contains(q) || it.url.lowercase().contains(q) || it.profile.lowercase().contains(q)
+        })
+    }
+    private var currentFilter = ""
+
+    private fun persist() { SiteStore.save(this, sites); refresh() }
+
+    private fun addSite() {
+        SiteDialogs.edit(this, Site("", "", DEFAULT_PROFILE), isNew = true) { sites.add(it); persist() }
+    }
+
+    private fun showSiteMenu(site: Site, anchor: android.view.View) {
+        PopupMenu(this, anchor).apply {
+            menu.add(0, 1, 0, "Edit")
+            menu.add(0, 2, 1, "Add to home screen")
+            menu.add(0, 3, 2, "Duplicate (new account)")
+            menu.add(0, 4, 3, "Move up")
+            menu.add(0, 5, 4, "Delete")
+            setOnMenuItemClickListener { item ->
+                when (item.itemId) {
+                    1 -> SiteDialogs.edit(this@MainActivity, site, isNew = false) { persist() }
+                    2 -> pinShortcut(site)
+                    3 -> {
+                        val nextProfile = nextFreeProfileName(site.profile)
+                        SiteDialogs.edit(this@MainActivity,
+                            Site(if (site.name == site.profile) nextProfile else "${site.name} · $nextProfile",
+                                site.url, nextProfile),
+                            isNew = true) { sites.add(sites.indexOf(site) + 1, it); persist() }
+                    }
+                    4 -> { val i = sites.indexOf(site); if (i > 0) { sites.removeAt(i); sites.add(i - 1, site); persist() } }
+                    5 -> AlertDialog.Builder(this@MainActivity)
+                        .setTitle("Delete \"${site.name}\"?")
+                        .setMessage("The login in profile \"${site.profile}\" is kept. Wipe it from Profiles if you want it gone.")
+                        .setPositiveButton("Delete") { _, _ -> sites.remove(site); persist() }
+                        .setNegativeButton("Cancel", null).show()
+                }
+                true
+            }
+            show()
+        }
+    }
+
+    private fun nextFreeProfileName(base: String): String {
+        val stem = base.replace(Regex("\\s*\\d+$"), "").ifBlank { "Account" }
+        val used = SiteStore.profiles(sites).toSet()
+        var n = 2
+        while ("$stem $n" in used) n++
+        return "$stem $n"
+    }
+
+    private fun pinShortcut(site: Site) {
+        if (!ShortcutManagerCompat.isRequestPinShortcutSupported(this)) {
+            Toast.makeText(this, "Your launcher doesn't support pinned shortcuts", Toast.LENGTH_SHORT).show(); return
+        }
+        val info = ShortcutInfoCompat.Builder(this, "site_${site.id}")
+            .setShortLabel(site.name.take(24))
+            .setLongLabel("${site.name} · ${site.profile}")
+            .setIcon(IconCompat.createWithAdaptiveBitmap(letterIcon(site)))
+            .setIntent(BrowserActivity.intentFor(this, site))
+            .build()
+        ShortcutManagerCompat.requestPinShortcut(this, info, null)
+    }
+
+    private fun letterIcon(site: Site): Bitmap {
+        val size = 216
+        val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        c.drawColor(SiteAdapter.colorFor(site.profile))
+        val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE; textSize = 72f; textAlign = Paint.Align.CENTER; isFakeBoldText = true
+        }
+        val label = SiteAdapter.initials(site)
+        c.drawText(label, size / 2f, size / 2f - (p.descent() + p.ascent()) / 2, p)
+        return bmp
+    }
+
+    // ---- Toolbar ----
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         menuInflater.inflate(R.menu.menu_main, menu)
+        (menu.findItem(R.id.action_search).actionView as SearchView).apply {
+            queryHint = "Search sites"
+            setOnQueryTextListener(object : SearchView.OnQueryTextListener {
+                override fun onQueryTextSubmit(q: String?) = true
+                override fun onQueryTextChange(q: String?): Boolean { refresh(q ?: ""); return true }
+            })
+        }
         return true
     }
 
-    override fun onOptionsItemSelected(item: MenuItem): Boolean {
-        return when (item.itemId) {
-            R.id.action_bookmarks_drawer -> { drawerLayout.openDrawer(bookmarkList); true }
-            R.id.action_go_back -> { if (webView.canGoBack()) webView.goBack(); true }
-            R.id.action_go_forward -> { if (webView.canGoForward()) webView.goForward(); true }
-            R.id.action_go_to_url -> { promptForUrl(); true }
-            R.id.action_reload -> { webView.reload(); true }
-            R.id.action_bookmark_current -> { promptToBookmarkCurrentPage(); true }
-            else -> super.onOptionsItemSelected(item)
-        }
+    override fun onOptionsItemSelected(item: MenuItem): Boolean = when (item.itemId) {
+        R.id.action_add -> { addSite(); true }
+        R.id.action_profiles -> { showProfiles(); true }
+        R.id.action_export -> { exportSites(); true }
+        R.id.action_import -> { importSites(); true }
+        else -> super.onOptionsItemSelected(item)
     }
 
-    private fun promptForUrl() {
-        val input = EditText(this)
-        input.inputType = InputType.TYPE_TEXT_VARIATION_URI
-        input.hint = "https://example.com"
+    private fun showProfiles() {
+        val names = SiteStore.profiles(sites)
+        val labels = names.map { n -> "$n  (${sites.count { it.profile == n }} sites)" }.toTypedArray()
         AlertDialog.Builder(this)
-            .setTitle("Open URL")
-            .setView(input)
-            .setPositiveButton("Go") { _, _ ->
-                val raw = input.text.toString().trim()
-                if (raw.isNotEmpty()) webView.loadUrl(normalizeUrl(raw))
+            .setTitle("Login profiles")
+            .setItems(labels) { _, which ->
+                val n = names[which]
+                AlertDialog.Builder(this)
+                    .setTitle("Log out of \"$n\"?")
+                    .setMessage("Deletes all cookies and site data in this profile. Every site using it will be logged out. " +
+                            "Close any open \"$n\" screens first.")
+                    .setPositiveButton("Wipe") { _, _ ->
+                        Profiles.wipe(n)
+                        Toast.makeText(this, "Profile \"$n\" wiped", Toast.LENGTH_SHORT).show()
+                    }
+                    .setNegativeButton("Cancel", null).show()
             }
-            .setNegativeButton("Cancel", null)
+            .setNegativeButton("Close", null)
             .show()
     }
 
-    private fun promptToBookmarkCurrentPage() {
-        val url = webView.url
-        if (url.isNullOrBlank() || url == "about:blank") return
-        val input = EditText(this)
-        input.setText(webView.title ?: url)
+    /** Only names + URLs + profile names. No cookies/tokens ever leave the app this way. */
+    private fun exportSites() {
+        val json = SiteStore.toJson(sites)
+        (getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
+            .setPrimaryClip(ClipData.newPlainText("Portal sites", json))
+        Toast.makeText(this, "${sites.size} sites copied to clipboard (no logins included)", Toast.LENGTH_LONG).show()
+    }
+
+    private fun importSites() {
+        val clip = (getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
+            .primaryClip?.getItemAt(0)?.coerceToText(this)?.toString().orEmpty()
+        val input = EditText(this).apply {
+            setText(clip); hint = "Paste exported JSON"; minLines = 4; maxLines = 10
+        }
         AlertDialog.Builder(this)
-            .setTitle("Save bookmark")
+            .setTitle("Import sites")
+            .setMessage("Adds sites from the JSON below. Existing ones (same id) are skipped.")
             .setView(input)
-            .setPositiveButton("Save") { _, _ ->
-                val name = input.text.toString().trim().ifEmpty { url }
-                bookmarks.add(Bookmark(name, url))
-                BookmarkStore.save(this, bookmarks)
-                bookmarkList.adapter?.notifyItemInserted(bookmarks.size - 1)
+            .setPositiveButton("Import") { _, _ ->
+                val incoming = runCatching { SiteStore.fromJson(input.text.toString()) }.getOrNull()
+                if (incoming == null) {
+                    Toast.makeText(this, "Couldn't read that JSON", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                val have = sites.map { it.id }.toSet()
+                val added = incoming.filter { it.id !in have && SiteDialogs.normalizeUrl(it.url) != null }
+                sites.addAll(added); persist()
+                Toast.makeText(this, "Imported ${added.size} sites", Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton("Cancel", null)
             .show()
-    }
-
-    private fun normalizeUrl(raw: String): String =
-        if (raw.startsWith("http://") || raw.startsWith("https://")) raw else "https://$raw"
-
-    @Suppress("DEPRECATION")
-    override fun onBackPressed() {
-        when {
-            drawerLayout.isDrawerOpen(bookmarkList) -> drawerLayout.closeDrawers()
-            webView.canGoBack() -> webView.goBack()
-            else -> super.onBackPressed()
-        }
     }
 }
