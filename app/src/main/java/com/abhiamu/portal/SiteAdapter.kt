@@ -16,6 +16,8 @@ class SiteAdapter(
 
     private var items: List<Site> = emptyList()
 
+    fun itemAt(pos: Int): Site? = items.getOrNull(pos)
+
     fun submit(list: List<Site>) { items = list.toList(); notifyDataSetChanged() }
 
     class VH(v: View) : RecyclerView.ViewHolder(v) {

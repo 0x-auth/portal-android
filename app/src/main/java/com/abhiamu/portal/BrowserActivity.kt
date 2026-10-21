@@ -98,7 +98,6 @@ class BrowserActivity : AppCompatActivity() {
         setSupportActionBar(toolbar)
         supportActionBar?.title = site.name
         supportActionBar?.subtitle = site.profile
-        toolbar.setNavigationOnClickListener { finishAndRemoveTask() }
 
         progressBar = findViewById(R.id.browserProgress)
 
@@ -324,7 +323,7 @@ class BrowserActivity : AppCompatActivity() {
     private fun setupShowBarButton() {
         val d = resources.displayMetrics.density
         val b = android.widget.ImageButton(this).apply {
-            setImageResource(android.R.drawable.arrow_down_float)
+            setImageResource(R.drawable.ic_expand); setColorFilter(Color.WHITE)
             background = android.graphics.drawable.GradientDrawable().apply {
                 shape = android.graphics.drawable.GradientDrawable.OVAL
                 setColor(0x66000000)
@@ -389,6 +388,13 @@ class BrowserActivity : AppCompatActivity() {
             val i = if (uri.scheme == "intent") Intent.parseUri(uri.toString(), Intent.URI_INTENT_SCHEME).apply {
                 addCategory(Intent.CATEGORY_BROWSABLE); component = null; selector = null
             } else Intent(Intent.ACTION_VIEW, uri)
+            if (uri.scheme == "http" || uri.scheme == "https") {
+                // Portal is now a browser too; don't open the link back in ourselves.
+                val others = packageManager.queryIntentActivities(i, 0)
+                    .filter { it.activityInfo.packageName != packageName }
+                if (others.isEmpty()) throw ActivityNotFoundException()
+                i.setPackage(others.first().activityInfo.packageName)
+            }
             startActivity(i)
         } catch (e: Exception) {
             Toast.makeText(this, "No app can open this link", Toast.LENGTH_SHORT).show()
@@ -404,6 +410,7 @@ class BrowserActivity : AppCompatActivity() {
         R.id.b_back -> { if (webView.canGoBack()) webView.goBack(); true }
         R.id.b_forward -> { if (webView.canGoForward()) webView.goForward(); true }
         R.id.b_reload -> { webView.reload(); true }
+        R.id.b_close -> { finishAndRemoveTask(); true }
         R.id.b_fullscreen -> { setBarHidden(true); true }
         R.id.b_home -> { webView.loadUrl(site.url); true }
         R.id.b_save_here -> { saveCurrentAsSite(); true }

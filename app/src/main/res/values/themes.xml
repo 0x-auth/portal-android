@@ -16,4 +16,11 @@
         <item name="android:textSize">11sp</item>
         <item name="android:textColor">@color/portal_muted</item>
     </style>
+    <style name="Theme.Portal.Invisible" parent="Theme.Portal">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:backgroundDimEnabled">false</item>
+    </style>
 </resources>

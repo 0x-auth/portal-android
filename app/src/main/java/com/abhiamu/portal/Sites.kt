@@ -67,11 +67,32 @@ object SiteStore {
         }
     }
 
-    private fun defaults(): MutableList<Site> = mutableListOf(
-        Site("Claude 1", "https://claude.ai/", "Claude 1"),
-        Site("Claude 2", "https://claude.ai/", "Claude 2"),
-        Site("Claude 3", "https://claude.ai/", "Claude 3"),
-        Site("Darmiyan Shoot", "https://darmiyan-shoot.netlify.app/post-alpha/"),
-        Site("Claude Archive", "https://claude-archive.pages.dev/")
-    )
+    private fun defaults(): MutableList<Site> = mutableListOf()
+
+    /**
+     * A link opened from another app. Reuses the login profile of any saved site on the
+     * same domain (so it opens already signed in); asks only if several accounts match.
+     * The link is saved as a site unless that exact URL+profile is already saved.
+     */
+    fun profilesForHost(sites: List<Site>, host: String): List<String> {
+        val h = baseDomain(host)
+        return sites.filter { baseDomain(android.net.Uri.parse(it.url).host ?: "") == h }
+            .map { it.profile }.distinct()
+    }
+
+    fun saveLink(context: Context, url: String, profile: String): Site {
+        val all = load(context)
+        all.firstOrNull { it.url == url && it.profile == profile }?.let { return it }
+        val u = android.net.Uri.parse(url)
+        val host = (u.host ?: url).removePrefix("www.")
+        val path = u.path?.trim('/')?.substringAfterLast('/')?.take(24).orEmpty()
+        val s = Site(if (path.isEmpty()) host else "$host/$path", url, profile)
+        all.add(0, s)
+        save(context, all)
+        return s
+    }
+
+    /** "chat.claude.ai" and "claude.ai" count as the same site for picking an account. */
+    private fun baseDomain(host: String): String =
+        host.lowercase().removePrefix("www.").split('.').takeLast(2).joinToString(".")
 }
