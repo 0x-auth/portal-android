@@ -34,6 +34,31 @@ object Profiles {
 
     fun cookieFor(name: String, url: String): String? = cookieManager(name).getCookie(url)
 
+    /**
+     * Log out of ONE site inside a profile: expire every cookie visible for its URL
+     * (all parent domains/paths too) and delete that origin's storage. Other sites in
+     * the same profile keep their logins.
+     */
+    fun clearSite(name: String, url: String) {
+        val cm = cookieManager(name)
+        val u = android.net.Uri.parse(url)
+        val host = u.host ?: return
+        val labels = host.split('.')
+        val domains = (0 until (labels.size - 1).coerceAtLeast(1)).map { labels.drop(it).joinToString(".") }
+        val names = cm.getCookie(url).orEmpty().split(';')
+            .mapNotNull { it.substringBefore('=').trim().takeIf { n -> n.isNotEmpty() } }.distinct()
+        for (n in names) for (d in domains) for (path in listOf("/", u.path ?: "/")) {
+            val expired = "$n=; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=$path"
+            cm.setCookie("https://$d", "$expired; Domain=$d")
+            cm.setCookie("https://$d", expired)               // host-only variant
+        }
+        cm.flush()
+        val storage = if (supported())
+            ProfileStore.getInstance().getOrCreateProfile(internalName(name)).webStorage
+        else android.webkit.WebStorage.getInstance()
+        for (d in domains) storage.deleteOrigin("https://$d")
+    }
+
     /** Log out everything in a profile: cookies + site storage. */
     fun wipe(name: String) {
         if (!supported()) {

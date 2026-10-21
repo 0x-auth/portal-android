@@ -13,8 +13,7 @@
         android:layout_height="48dp"
         android:background="@color/portal_primary"
         android:theme="@style/ThemeOverlay.MaterialComponents.Dark.ActionBar"
-        app:navigationIcon="@android:drawable/ic_menu_close_clear_cancel"
-        app:navigationContentDescription="Close site"
+        app:contentInsetStart="16dp"
         app:titleTextAppearance="@style/TextAppearance.Portal.BarTitle"
         app:subtitleTextAppearance="@style/TextAppearance.Portal.BarSubtitle" />
 

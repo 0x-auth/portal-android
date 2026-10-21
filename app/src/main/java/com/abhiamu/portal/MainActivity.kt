@@ -45,6 +45,16 @@ class MainActivity : AppCompatActivity() {
             adapter = this@MainActivity.adapter
         }
         findViewById<FloatingActionButton>(R.id.addFab).setOnClickListener { addSite() }
+
+        // Swipe a tile left or right to remove it (with Undo).
+        androidx.recyclerview.widget.ItemTouchHelper(object :
+            androidx.recyclerview.widget.ItemTouchHelper.SimpleCallback(0,
+                androidx.recyclerview.widget.ItemTouchHelper.LEFT or androidx.recyclerview.widget.ItemTouchHelper.RIGHT) {
+            override fun onMove(rv: RecyclerView, a: RecyclerView.ViewHolder, b: RecyclerView.ViewHolder) = false
+            override fun onSwiped(vh: RecyclerView.ViewHolder, dir: Int) {
+                adapter.itemAt(vh.bindingAdapterPosition)?.let { removeWithUndo(it) } ?: refresh()
+            }
+        }).attachToRecyclerView(findViewById(R.id.siteGrid))
         refresh()
     }
 
@@ -60,6 +70,8 @@ class MainActivity : AppCompatActivity() {
         adapter.submit(if (q.isEmpty()) sites else sites.filter {
             it.name.lowercase().contains(q) || it.url.lowercase().contains(q) || it.profile.lowercase().contains(q)
         })
+        findViewById<android.view.View>(R.id.emptyState).visibility =
+            if (sites.isEmpty()) android.view.View.VISIBLE else android.view.View.GONE
     }
     private var currentFilter = ""
 
@@ -75,7 +87,8 @@ class MainActivity : AppCompatActivity() {
             menu.add(0, 2, 1, "Add to home screen")
             menu.add(0, 3, 2, "Duplicate (new account)")
             menu.add(0, 4, 3, "Move up")
-            menu.add(0, 5, 4, "Delete")
+            menu.add(0, 6, 4, "Clear site data (log out of this site only)")
+            menu.add(0, 5, 5, "Remove")
             setOnMenuItemClickListener { item ->
                 when (item.itemId) {
                     1 -> SiteDialogs.edit(this@MainActivity, site, isNew = false) { persist() }
@@ -88,16 +101,31 @@ class MainActivity : AppCompatActivity() {
                             isNew = true) { sites.add(sites.indexOf(site) + 1, it); persist() }
                     }
                     4 -> { val i = sites.indexOf(site); if (i > 0) { sites.removeAt(i); sites.add(i - 1, site); persist() } }
-                    5 -> AlertDialog.Builder(this@MainActivity)
-                        .setTitle("Delete \"${site.name}\"?")
-                        .setMessage("The login in profile \"${site.profile}\" is kept. Wipe it from Profiles if you want it gone.")
-                        .setPositiveButton("Delete") { _, _ -> sites.remove(site); persist() }
+                    5 -> removeWithUndo(site)
+                    6 -> AlertDialog.Builder(this@MainActivity)
+                        .setTitle("Clear data for ${android.net.Uri.parse(site.url).host}?")
+                        .setMessage("Logs out of this site in \"${site.profile}\" and deletes its stored data. " +
+                                "Other sites in that profile stay signed in. Close the site first if it's open.")
+                        .setPositiveButton("Clear") { _, _ ->
+                            Profiles.clearSite(site.profile, site.url)
+                            Toast.makeText(this@MainActivity, "Cleared", Toast.LENGTH_SHORT).show()
+                        }
                         .setNegativeButton("Cancel", null).show()
                 }
                 true
             }
             show()
         }
+    }
+
+    private fun removeWithUndo(site: Site) {
+        val i = sites.indexOf(site)
+        if (i < 0) { refresh(); return }
+        sites.removeAt(i); persist()
+        com.google.android.material.snackbar.Snackbar
+            .make(findViewById(R.id.siteGrid), "Removed \"${site.name}\"", com.google.android.material.snackbar.Snackbar.LENGTH_LONG)
+            .setAction("Undo") { sites.add(i.coerceAtMost(sites.size), site); persist() }
+            .show()
     }
 
     private fun nextFreeProfileName(base: String): String {
