@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fitsSystemWindows="true"
+    android:orientation="vertical"
+    android:background="@color/portal_primary_dark">
+
+    <androidx.appcompat.widget.Toolbar
+        android:id="@+id/browserToolbar"
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:background="@color/portal_primary"
+        android:theme="@style/ThemeOverlay.MaterialComponents.Dark.ActionBar"
+        app:navigationIcon="@android:drawable/ic_menu_close_clear_cancel"
+        app:navigationContentDescription="Close site"
+        app:titleTextAppearance="@style/TextAppearance.Portal.BarTitle"
+        app:subtitleTextAppearance="@style/TextAppearance.Portal.BarSubtitle" />
+
+    <ProgressBar
+        android:id="@+id/browserProgress"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="match_parent"
+        android:layout_height="3dp"
+        android:max="100"
+        android:progressTint="@color/portal_accent"
+        android:visibility="gone" />
+
+    <FrameLayout
+        android:id="@+id/webContainer"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+</LinearLayout>

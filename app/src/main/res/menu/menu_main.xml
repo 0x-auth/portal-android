@@ -1,9 +1,9 @@
 <menu xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto">
-    <item android:id="@+id/action_bookmarks_drawer" android:title="Bookmarks" android:icon="@android:drawable/ic_menu_agenda" app:showAsAction="ifRoom" />
-    <item android:id="@+id/action_go_back" android:title="Back" android:icon="@android:drawable/ic_media_previous" app:showAsAction="ifRoom" />
-    <item android:id="@+id/action_go_forward" android:title="Forward" android:icon="@android:drawable/ic_media_next" app:showAsAction="ifRoom" />
-    <item android:id="@+id/action_go_to_url" android:title="Open URL" android:icon="@android:drawable/ic_menu_add" app:showAsAction="ifRoom" />
-    <item android:id="@+id/action_reload" android:title="Reload" android:icon="@android:drawable/ic_menu_rotate" app:showAsAction="ifRoom" />
-    <item android:id="@+id/action_bookmark_current" android:title="Save current page" app:showAsAction="never" />
+    <item android:id="@+id/action_search" android:title="Search" android:icon="@android:drawable/ic_menu_search"
+        app:showAsAction="ifRoom|collapseActionView" app:actionViewClass="androidx.appcompat.widget.SearchView" />
+    <item android:id="@+id/action_add" android:title="Add site" app:showAsAction="never" />
+    <item android:id="@+id/action_profiles" android:title="Login profiles / log out" app:showAsAction="never" />
+    <item android:id="@+id/action_export" android:title="Export sites (copy)" app:showAsAction="never" />
+    <item android:id="@+id/action_import" android:title="Import sites (paste)" app:showAsAction="never" />
 </menu>

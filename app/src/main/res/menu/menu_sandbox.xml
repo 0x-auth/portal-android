@@ -1,6 +1,0 @@
-<menu xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto">
-    <item android:id="@+id/sandbox_go_back" android:title="Back" android:icon="@android:drawable/ic_media_previous" app:showAsAction="ifRoom" />
-    <item android:id="@+id/sandbox_go_forward" android:title="Forward" android:icon="@android:drawable/ic_media_next" app:showAsAction="ifRoom" />
-    <item android:id="@+id/sandbox_reload" android:title="Reload" android:icon="@android:drawable/ic_menu_rotate" app:showAsAction="ifRoom" />
-</menu>
