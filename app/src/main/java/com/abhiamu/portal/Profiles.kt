@@ -28,12 +28,11 @@ object Profiles {
         WebViewCompat.setProfile(webView, n)
     }
 
-    fun cookieFor(name: String, url: String): String? {
-        val cm: CookieManager = if (supported())
-            ProfileStore.getInstance().getOrCreateProfile(internalName(name)).cookieManager
+    fun cookieManager(name: String): CookieManager =
+        if (supported()) ProfileStore.getInstance().getOrCreateProfile(internalName(name)).cookieManager
         else CookieManager.getInstance()
-        return cm.getCookie(url)
-    }
+
+    fun cookieFor(name: String, url: String): String? = cookieManager(name).getCookie(url)
 
     /** Log out everything in a profile: cookies + site storage. */
     fun wipe(name: String) {
