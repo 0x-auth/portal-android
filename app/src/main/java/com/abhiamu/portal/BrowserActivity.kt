@@ -66,6 +66,25 @@ class BrowserActivity : AppCompatActivity() {
         fileCallback = null
     }
 
+    private var customView: View? = null
+    private var customViewCallback: WebChromeClient.CustomViewCallback? = null
+
+    private var afterStorage: (() -> Unit)? = null
+    private val storagePermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        val a = afterStorage; afterStorage = null
+        if (ok) a?.invoke()
+        else Toast.makeText(this, "Storage permission is needed to save downloads on this Android version", Toast.LENGTH_LONG).show()
+    }
+
+    private var afterLocation: ((Boolean) -> Unit)? = null
+    private val locationPermission = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { res ->
+        val a = afterLocation; afterLocation = null
+        a?.invoke(res.values.any { it })
+    }
+
+    private val blobDownloads = mutableMapOf<String, BlobDownload>()
+    private class BlobDownload(val file: java.io.File, var name: String, var mime: String?)
+
     private val mediaPermission = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         grantPendingIfAllowed()
     }
@@ -112,6 +131,7 @@ class BrowserActivity : AppCompatActivity() {
             override fun handleOnBackPressed() {
                 val p = popup
                 when {
+                    customView != null -> exitCustomView()
                     p != null && p.canGoBack() -> p.goBack()
                     p != null -> closePopup()
                     webView.canGoBack() -> webView.goBack()
@@ -130,6 +150,13 @@ class BrowserActivity : AppCompatActivity() {
         val wv = WebView(this)
         Profiles.bind(wv, site.profile)
         configure(wv, isPopup)
+        // Channel for blob: downloads (Claude file exports etc.). Only accepts messages that
+        // carry a one-time nonce Portal generated for a download the user just started.
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
+            WebViewCompat.addWebMessageListener(wv, "PortalDl", setOf("*")) { _, msg, _, _, _ ->
+                msg.data?.let { onBlobChunk(it) }
+            }
+        }
         return wv
     }
 
@@ -154,11 +181,10 @@ class BrowserActivity : AppCompatActivity() {
             loadWithOverviewMode = true
             mediaPlaybackRequiresUserGesture = true
             safeBrowsingEnabled = true
-            // Look like normal Chrome: drop the WebView markers ("; wv", "Version/4.0").
-            // Sites (Google sign-in especially) otherwise degrade or refuse.
-            userAgentString = userAgentString
-                .replace("; wv)", ")")
-                .replace(Regex("Version/\\d+\\.\\d+ "), "")
+            setGeolocationEnabled(true)
+            // Keep WebView's own user agent. Rewriting it to look like Chrome made it
+            // disagree with the client-hint headers WebView still sends ("Android WebView"),
+            // and Google sign-in rejects that mismatch as an unsafe browser.
         }
         wv.overScrollMode = View.OVER_SCROLL_NEVER
         wv.setBackgroundColor(Color.TRANSPARENT)
@@ -215,6 +241,30 @@ class BrowserActivity : AppCompatActivity() {
                 if (window == popup) closePopup()
             }
 
+            override fun onGeolocationPermissionsShowPrompt(origin: String, callback: android.webkit.GeolocationPermissions.Callback) {
+                AlertDialog.Builder(this@BrowserActivity)
+                    .setTitle("Share location?")
+                    .setMessage("${Uri.parse(origin).host ?: origin} wants to use your location.")
+                    .setPositiveButton("Allow") { _, _ -> withLocation { ok -> callback.invoke(origin, ok, false) } }
+                    .setNegativeButton("Block") { _, _ -> callback.invoke(origin, false, false) }
+                    .setOnCancelListener { callback.invoke(origin, false, false) }
+                    .show()
+            }
+
+            override fun onShowCustomView(view: View, callback: CustomViewCallback) {
+                if (customView != null) { callback.onCustomViewHidden(); return }
+                customView = view; customViewCallback = callback
+                view.setBackgroundColor(Color.BLACK)
+                (window.decorView as FrameLayout).addView(view, FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+                androidx.core.view.WindowCompat.getInsetsController(window, window.decorView).apply {
+                    hide(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+                    systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                }
+            }
+
+            override fun onHideCustomView() { exitCustomView() }
+
             override fun onProgressChanged(view: WebView, newProgress: Int) {
                 progressBar.visibility = if (newProgress in 1..99) View.VISIBLE else View.GONE
                 progressBar.progress = newProgress
@@ -253,7 +303,7 @@ class BrowserActivity : AppCompatActivity() {
         }
 
         wv.setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
-            download(url, userAgent, contentDisposition, mimeType)
+            download(wv, url, userAgent, contentDisposition, mimeType)
         }
     }
 
@@ -361,13 +411,33 @@ class BrowserActivity : AppCompatActivity() {
         if (allowed.isEmpty()) req.deny() else req.grant(allowed.toTypedArray())
     }
 
-    private fun download(url: String, userAgent: String?, contentDisposition: String?, mimeType: String?) {
-        if (!url.startsWith("https://") && !url.startsWith("http://")) {
-            Toast.makeText(this, "This download type isn't supported here", Toast.LENGTH_SHORT).show()
-            return
+    private fun download(wv: WebView, url: String, userAgent: String?, contentDisposition: String?, mimeType: String?) {
+        when {
+            url.startsWith("https://") || url.startsWith("http://") ->
+                withStorage { downloadHttp(url, userAgent, contentDisposition, mimeType) }
+            url.startsWith("data:") -> withStorage { saveDataUrl(url, contentDisposition, mimeType) }
+            url.startsWith("blob:") -> withStorage { fetchBlob(wv, url, contentDisposition, mimeType) }
+            else -> Toast.makeText(this, "This download type isn't supported", Toast.LENGTH_SHORT).show()
         }
+    }
+
+    /** Android 9 and below need the storage permission to write to Downloads; 10+ don't. */
+    private fun withStorage(action: () -> Unit) {
+        if (android.os.Build.VERSION.SDK_INT >= 29 ||
+            ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+        ) action()
+        else { afterStorage = action; storagePermission.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE) }
+    }
+
+    private fun withLocation(then: (Boolean) -> Unit) {
+        val perms = arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+        if (perms.any { ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED }) then(true)
+        else { afterLocation = then; locationPermission.launch(perms) }
+    }
+
+    private fun downloadHttp(url: String, userAgent: String?, contentDisposition: String?, mimeType: String?) {
         try {
-            val name = URLUtil.guessFileName(url, contentDisposition, mimeType)
+            val name = Downloads.safeName(URLUtil.guessFileName(url, contentDisposition, mimeType), mimeType)
             val req = DownloadManager.Request(Uri.parse(url))
                 .setMimeType(mimeType)
                 .setTitle(name)
@@ -381,6 +451,92 @@ class BrowserActivity : AppCompatActivity() {
         } catch (e: Exception) {
             Toast.makeText(this, "Download failed: ${e.message}", Toast.LENGTH_LONG).show()
         }
+    }
+
+    private fun saveDataUrl(url: String, contentDisposition: String?, mimeType: String?) {
+        try {
+            val header = url.substringAfter("data:").substringBefore(',')
+            val payload = url.substringAfter(',')
+            val mime = header.substringBefore(';').ifBlank { mimeType ?: "application/octet-stream" }
+            val bytes = if (header.contains(";base64")) android.util.Base64.decode(payload, android.util.Base64.DEFAULT)
+                        else Uri.decode(payload).toByteArray()
+            val name = Downloads.save(this, nameFromDisposition(contentDisposition) ?: "download", mime) { it.write(bytes) }
+            Toast.makeText(this, "Saved to Downloads/$name", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "Download failed: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    /**
+     * blob: URLs only exist inside the page, so the page reads the blob and streams it
+     * back in base64 chunks over the PortalDl channel, tagged with a one-time nonce.
+     */
+    private fun fetchBlob(wv: WebView, url: String, contentDisposition: String?, mimeType: String?) {
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
+            Toast.makeText(this, "Update Android System WebView to download this file", Toast.LENGTH_LONG).show(); return
+        }
+        val nonce = java.util.UUID.randomUUID().toString()
+        val tmp = java.io.File.createTempFile("blob", ".part", cacheDir)
+        blobDownloads[nonce] = BlobDownload(tmp, nameFromDisposition(contentDisposition) ?: "download", mimeType)
+        val js = """(function(u,n,fb){
+            var a=document.querySelector('a[href="'+u+'"]');
+            var name=(a&&a.getAttribute('download'))||fb;
+            fetch(u).then(function(r){return r.blob();}).then(function(b){
+              var CH=393216,total=Math.max(1,Math.ceil(b.size/CH)),i=0;
+              function next(){
+                var fr=new FileReader();
+                fr.onload=function(){
+                  var s=fr.result; s=s.substring(s.indexOf(',')+1);
+                  PortalDl.postMessage(JSON.stringify({n:n,i:i,t:total,d:s,name:name,mime:b.type}));
+                  if(++i<total) next();
+                };
+                fr.readAsDataURL(b.slice(i*CH,(i+1)*CH));
+              }
+              next();
+            }).catch(function(e){PortalDl.postMessage(JSON.stringify({n:n,err:String(e)}));});
+          })(${org.json.JSONObject.quote(url)},${org.json.JSONObject.quote(nonce)},${org.json.JSONObject.quote(blobDownloads[nonce]!!.name)})"""
+        wv.evaluateJavascript(js, null)
+        Toast.makeText(this, "Downloading…", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun onBlobChunk(raw: String) {
+        val o = runCatching { org.json.JSONObject(raw) }.getOrNull() ?: return
+        val nonce = o.optString("n")
+        val dl = blobDownloads[nonce] ?: return            // not ours / not requested -> ignore
+        if (o.has("err")) {
+            blobDownloads.remove(nonce); dl.file.delete()
+            Toast.makeText(this, "Download failed: ${o.optString("err")}", Toast.LENGTH_LONG).show(); return
+        }
+        try {
+            o.optString("name").takeIf { it.isNotBlank() }?.let { dl.name = it }
+            o.optString("mime").takeIf { it.isNotBlank() }?.let { dl.mime = it }
+            java.io.FileOutputStream(dl.file, true).use {
+                it.write(android.util.Base64.decode(o.optString("d"), android.util.Base64.DEFAULT))
+            }
+            if (o.optInt("i") >= o.optInt("t") - 1) {
+                blobDownloads.remove(nonce)
+                val name = Downloads.save(this, dl.name, dl.mime) { out -> dl.file.inputStream().use { it.copyTo(out) } }
+                dl.file.delete()
+                Toast.makeText(this, "Saved to Downloads/$name", Toast.LENGTH_SHORT).show()
+            }
+        } catch (e: Exception) {
+            blobDownloads.remove(nonce); dl.file.delete()
+            Toast.makeText(this, "Download failed: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun nameFromDisposition(cd: String?): String? =
+        cd?.let { Regex("""filename\*?=(?:UTF-8'')?"?([^";]+)"?""", RegexOption.IGNORE_CASE).find(it)?.groupValues?.get(1) }
+            ?.let { Uri.decode(it) }?.takeIf { it.isNotBlank() }
+
+    private fun exitCustomView() {
+        val v = customView ?: return
+        customView = null
+        (window.decorView as FrameLayout).removeView(v)
+        androidx.core.view.WindowCompat.getInsetsController(window, window.decorView)
+            .show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+        customViewCallback?.onCustomViewHidden()
+        customViewCallback = null
     }
 
     private fun launchExternal(uri: Uri) {
@@ -440,6 +596,9 @@ class BrowserActivity : AppCompatActivity() {
     override fun onResume() { super.onResume(); if (::webView.isInitialized) webView.onResume() }
 
     override fun onDestroy() {
+        exitCustomView()
+        blobDownloads.values.forEach { it.file.delete() }
+        blobDownloads.clear()
         closePopup()
         if (::webView.isInitialized) {
             (webView.parent as? ViewGroup)?.removeView(webView)
